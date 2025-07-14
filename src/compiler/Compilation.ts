@@ -141,13 +141,10 @@ export class Compilation {
       module.dependencies = parseResult.dependencies;
 
       // 5. 递归构建依赖模块
-      for (const dep of module.dependencies) {
-        try {
-          const depModule = await this.buildModule(dep.request, module);
-          dep.module = depModule;
-        } catch (error: any) {
-          this.errors.push(new Error(`Failed to resolve dependency ${dep.request}: ${error.message}`));
-        }
+      for (const dep of parseResult.dependencies) {
+        const depModule = await this.buildModule(dep.request, module);
+        // 将构建完成的模块对象回填到依赖中
+        dep.module = depModule;
       }
 
       module.built = true;
@@ -168,11 +165,27 @@ export class Compilation {
 
     const entryModules: Module[] = []
     for (const entry of entries) {
-      const module = this.modules.get(entry)
+      // 解析入口路径为绝对路径，以匹配 modules Map 中的键
+      const entryContext = this.compiler.config.context || process.cwd()
+      let resolvedEntry: string
+
+      try {
+        resolvedEntry = await this.resolver.resolve(entry, entryContext)
+        console.log(`🔍 解析入口 ${entry} -> ${resolvedEntry}`)
+      } catch (error) {
+        console.error(`❌ 无法解析入口: ${entry}`, error)
+        this.errors.push(new Error(`无法解析入口模块: ${entry}`))
+        continue
+      }
+
+      const module = this.modules.get(resolvedEntry)
       if (module) {
         entryModules.push(module)
+        console.log(`✅ 找到入口模块: ${resolvedEntry}`)
       } else {
-        const error = new Error(`入口模块未找到: ${entry}`)
+        console.error(`❌ 入口模块未在已构建模块中找到: ${resolvedEntry}`)
+        console.log(`📋 已构建的模块:`, Array.from(this.modules.keys()))
+        const error = new Error(`入口模块未找到: ${entry} (${resolvedEntry})`)
         this.errors.push(error)
       }
     }

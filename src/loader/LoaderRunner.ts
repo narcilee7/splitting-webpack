@@ -1,42 +1,91 @@
 import { readFile } from "../utils/fs.js"
 import type { RuleSetRule, LoaderContext } from "../types/config.js"
+import { extname } from "path"
 
 export interface LoaderResult {
     source?: string;
     sourceMap?: any;
+    dependencies?: string[];
+}
+
+export interface LoaderInfo {
+    loader: string;
+    options?: any;
+    pitch?: boolean;
 }
 
 export class LoaderRunner {
     private rules: RuleSetRule[]
+    private loaderCache = new Map<string, any>()
 
     constructor(rules: RuleSetRule[]) {
         this.rules = rules
     }
 
     async run(resourcePath: string): Promise<LoaderResult> {
-        // 读取原始文件内容
-        let source = await readFile(resourcePath)
-        let sourceMap: any = undefined
+        console.log(`🔧 运行Loader: ${resourcePath}`)
 
-        // 匹配loader规则
-        const matchedLoaders = this.getMatchedLoaders(resourcePath)
+        try {
+            // 读取原始文件内容
+            let source = await readFile(resourcePath)
+            let sourceMap: any = undefined
+            const dependencies: string[] = []
 
-        // 逆序执行Loader
-        for (let i = matchedLoaders.length - 1; i >= 0; i--) {
-            const loader = matchedLoaders[i]
-            const result = await this.runLoader(loader, resourcePath, source, sourceMap)
-            source = result.source!
-            sourceMap = result.sourceMap
-        }
+            // 匹配loader规则
+            const matchedLoaders = this.getMatchedLoaders(resourcePath)
 
-        return {
-            source,
-            sourceMap
+            if (matchedLoaders.length > 0) {
+                console.log(`📋 匹配到 ${matchedLoaders.length} 个Loader: ${matchedLoaders.map(l => l.loader).join(' -> ')}`)
+            }
+
+            // Pitch阶段（正序执行）
+            for (let i = 0; i < matchedLoaders.length; i++) {
+                const loader = matchedLoaders[i]
+                const pitchResult = await this.runPitch(loader, resourcePath)
+                if (pitchResult !== undefined) {
+                    // Pitch返回值，跳过后续loader
+                    source = pitchResult
+                    break
+                }
+            }
+
+            // Normal阶段（逆序执行）
+            for (let i = matchedLoaders.length - 1; i >= 0; i--) {
+                const loader = matchedLoaders[i]
+                console.log(`⚙️  执行Loader: ${loader.loader}`)
+
+                const result = await this.runLoader(loader, resourcePath, source, sourceMap)
+                source = result.source || source
+                sourceMap = result.sourceMap || sourceMap
+
+                if (result.dependencies) {
+                    dependencies.push(...result.dependencies)
+                }
+            }
+
+            console.log(`✅ Loader执行完成: ${resourcePath}`)
+            return {
+                source,
+                sourceMap,
+                dependencies
+            }
+
+        } catch (error: any) {
+            console.error(`❌ Loader执行失败: ${resourcePath}`, error.message)
+            throw new Error(`Loader failed for ${resourcePath}: ${error.message}`)
         }
     }
 
     private getMatchedLoaders(resourcePath: string): Array<{ loader: string, options?: any }> {
         const loaders: Array<{ loader: string, options?: any }> = []
+
+        // 自动推断Loader（如果没有明确配置）
+        if (this.rules.length === 0) {
+            const inferredLoader = this.inferLoader(resourcePath)
+            if (inferredLoader) {
+                loaders.push(inferredLoader)
+            }
+        }
 
         for (const rule of this.rules) {
             if (this.testRule(rule, resourcePath)) {
@@ -49,13 +98,11 @@ export class LoaderRunner {
                     const uses = Array.isArray(rule.use) ? rule.use : [rule.use]
                     for (const use of uses) {
                         if (typeof use === 'string') {
+                            loaders.push({ loader: use })
+                        } else if (typeof use === 'object') {
                             loaders.push({
-                                loader: use
-                            })
-                        } else {
-                            loaders.push({
-                                loader: use.loader!,
-                                options: use.options
+                                loader: (use as any).loader,
+                                options: (use as any).options
                             })
                         }
                     }
@@ -138,20 +185,94 @@ export class LoaderRunner {
     }
 
     private async loadLoader(loaderName: string): Promise<any> {
-        if (loaderName === 'babel-loader') {
-            // 内置的laoder
-            return await import('./builtin/babel-loader')
+        // 检查缓存
+        if (this.loaderCache.has(loaderName)) {
+            return this.loaderCache.get(loaderName)
         }
 
-        if (loaderName === 'ts-loader') {
-            return await import('./builtin/ts-loader.js');
-        }
+        let loaderModule: any
 
-        // 尝试从 node_modules 加载
         try {
-            return await import(loaderName);
+            // 处理内置Loader
+            if (loaderName.startsWith('builtin:')) {
+                const builtinName = loaderName.replace('builtin:', '')
+                switch (builtinName) {
+                    case 'babel-loader':
+                        loaderModule = await import('./builtin/babel-loader.js')
+                        break
+                    case 'ts-loader':
+                        loaderModule = await import('./builtin/ts-loader.js')
+                        break
+                    case 'css-loader':
+                        loaderModule = await import('./builtin/css-loader.js')
+                        break
+                    case 'json-loader':
+                        loaderModule = await import('./builtin/json-loader.js')
+                        break
+                    case 'url-loader':
+                        loaderModule = await import('./builtin/url-loader.js')
+                        break
+                    case 'raw-loader':
+                        loaderModule = await import('./builtin/raw-loader.js')
+                        break
+                    default:
+                        throw new Error(`Unknown builtin loader: ${builtinName}`)
+                }
+            } else if (loaderName === 'babel-loader' || loaderName === 'ts-loader') {
+                // 兼容旧的loader名称
+                loaderModule = await import(`./builtin/${loaderName}.js`)
+            } else {
+                // 尝试从 node_modules 加载
+                loaderModule = await import(loaderName)
+            }
+
+            // 缓存Loader
+            this.loaderCache.set(loaderName, loaderModule)
+            console.log(`✅ 加载Loader成功: ${loaderName}`)
+
+            return loaderModule
+
         } catch (error: any) {
-            throw new Error(`Cannot load loader ${loaderName}: ${error.message}`);
+            console.error(`❌ 加载Loader失败: ${loaderName}`, error.message)
+            throw new Error(`Cannot load loader ${loaderName}: ${error.message}`)
         }
+    }
+
+    private inferLoader(resourcePath: string): { loader: string, options?: any } | null {
+        const ext = extname(resourcePath)
+
+        switch (ext) {
+            case '.ts':
+            case '.tsx':
+                return { loader: 'builtin:ts-loader' }
+            case '.js':
+            case '.jsx':
+                return { loader: 'builtin:babel-loader' }
+            case '.css':
+                return { loader: 'builtin:css-loader' }
+            case '.json':
+                return { loader: 'builtin:json-loader' }
+            case '.png':
+            case '.jpg':
+            case '.jpeg':
+            case '.gif':
+            case '.svg':
+                return { loader: 'builtin:url-loader' }
+            default:
+                return { loader: 'builtin:raw-loader' }
+        }
+    }
+
+    private async runPitch(loader: { loader: string, options?: any }, resourcePath: string): Promise<string | undefined> {
+        try {
+            const loaderModule = await this.loadLoader(loader.loader)
+            if (loaderModule.pitch && typeof loaderModule.pitch === 'function') {
+                console.log(`🔄 执行Pitch: ${loader.loader}`)
+                return await loaderModule.pitch(resourcePath, loader.options)
+            }
+        } catch (error) {
+            console.warn(`⚠️  Pitch执行失败: ${loader.loader}`, error)
+        }
+        return undefined
     }
 }

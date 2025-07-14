@@ -39,7 +39,36 @@ export class Compiler {
     }
 
     private applyBuiltinPlugins(): void {
-        // TODO 添加内置插件
+        const { mode, devtool } = this.config
+
+        // 根据mode自动应用相关插件
+        if (mode === 'development') {
+            // 开发模式自动应用进度插件
+            const { ProgressPlugin } = require('../plugins/index.js')
+            new ProgressPlugin({
+                profile: true,
+                showModules: true
+            }).apply(this)
+        }
+
+        // 自动应用DefinePlugin设置环境变量
+        if (mode) {
+            const { DefinePlugin } = require('../plugins/index.js')
+            new DefinePlugin({
+                'process.env.NODE_ENV': JSON.stringify(mode),
+                'process.env.WEBPACK_MODE': JSON.stringify(mode)
+            }).apply(this)
+        }
+
+        // 如果开启了clean选项，自动应用清理插件
+        if (this.config.output.clean) {
+            const { CleanWebpackPlugin } = require('../plugins/index.js')
+            new CleanWebpackPlugin({
+                verbose: mode === 'development'
+            }).apply(this)
+        }
+
+        console.log('🔌 内置插件应用完成')
     }
 
     async run(): Promise<Stats> {
