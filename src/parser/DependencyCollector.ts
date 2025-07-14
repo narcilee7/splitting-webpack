@@ -17,9 +17,6 @@ export class DependencyCollector {
     private collectDependenciesFromSource(source: string): Dependency[] {
         const dependencies: Dependency[] = [];
 
-        console.log(`🔍 开始收集依赖，源码长度: ${source.length}`);
-        console.log(`📝 源码内容:\n${source}`);
-
         // ES6 import 语句的各种形式
         // import xxx from 'module'
         // import { xxx } from 'module' 
@@ -30,7 +27,6 @@ export class DependencyCollector {
 
         while ((match = importRegex.exec(source)) !== null) {
             const request = match[1];
-            console.log(`📦 找到 import 依赖: ${request}`);
             dependencies.push({
                 type: 'import',
                 request: request,
@@ -41,7 +37,6 @@ export class DependencyCollector {
         const requireRegex = /require\(['"]([^'"]+)['"]\)/g;
         while ((match = requireRegex.exec(source)) !== null) {
             const request = match[1];
-            console.log(`📦 找到 require 依赖: ${request}`);
             dependencies.push({
                 type: 'require',
                 request: request,
@@ -52,14 +47,12 @@ export class DependencyCollector {
         const dynamicImportRegex = /import\(['"]([^'"]+)['"]\)/g;
         while ((match = dynamicImportRegex.exec(source)) !== null) {
             const request = match[1];
-            console.log(`📦 找到动态 import 依赖: ${request}`);
             dependencies.push({
                 type: 'dynamic-import',
                 request: request,
             });
         }
 
-        console.log(`✅ 依赖收集完成，共找到 ${dependencies.length} 个依赖`);
         return dependencies;
     }
 }
