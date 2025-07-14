@@ -1,0 +1,264 @@
+import { LoaderRunner } from "../loader/LoaderRunner.js";
+import { Resolver } from "../resolver/Resolver.js";
+import { Chunk } from "../types/chunk.js";
+import { Module } from "../types/module.js";
+import { Compiler } from "./Compiler.js";
+import { CodeGenerator } from "../chunk/CodeGenerator.js";
+import { ChunkGraph } from "../chunk/ChunkGraph.js";
+import { Parser } from "../parser/Parser.js";
+import { join } from "path";
+import { writeFile } from "../utils/fs.js";
+
+export class Compilation {
+  public compiler: Compiler;
+  public modules: Map<string, Module> = new Map();
+  public chunks: Chunk[] = [];
+  public errors: Error[] = [];
+  public warnings: string[] = [];
+  public assets: Map<string, string> = new Map();
+
+  private resolver: Resolver;
+  private loaderRunner: LoaderRunner;
+  private parser: Parser;
+  private chunkGraph: ChunkGraph;
+  private codeGenerator: CodeGenerator;
+
+  constructor(compiler: Compiler) {
+    this.compiler = compiler;
+    this.resolver = new Resolver(compiler.config.resolve);
+    this.loaderRunner = new LoaderRunner(compiler.config.module?.rules || []);
+    this.parser = new Parser();
+    this.chunkGraph = new ChunkGraph();
+    this.codeGenerator = new CodeGenerator();
+  }
+
+  async build(): Promise<void> {
+    console.log(`📦 开始构建模块...`)
+
+    try {
+      const entries = this.getEntries()
+
+      // 构建所有入口模块
+      for (const entry of entries) {
+        console.log(`📥 构建入口: ${entry}`)
+        // 为入口文件提供基准目录 - 使用配置文件所在目录或当前工作目录
+        const entryContext = this.compiler.config.context || process.cwd()
+        await this.buildModuleWithContext(entry, entryContext)
+      }
+
+      console.log(`📊 构建完成! 共 ${this.modules.size} 个模块`)
+
+    } catch (error) {
+      console.error('构建失败:', error)
+      throw error
+    }
+  }
+
+  async buildModuleWithContext(request: string, context: string): Promise<Module> {
+    try {
+      // 1. 解析模块路径，使用 context 作为基准
+      const resolved = await this.resolver.resolve(request, context);
+
+      // 检查模块是否已经构建
+      if (this.modules.has(resolved)) {
+        return this.modules.get(resolved)!;
+      }
+
+      // 2. 创建模块对象
+      const module: Module = {
+        id: resolved,
+        request: resolved,
+        userRequest: request,
+        rawRequest: request,
+        resource: resolved,
+        dependencies: [],
+        source: '',
+        built: false,
+        error: undefined,
+        warnings: [],
+      };
+
+      this.modules.set(resolved, module);
+
+      // 3. 通过Loader处理文件内容
+      const loaderResult = await this.loaderRunner.run(resolved);
+      const source = loaderResult.source || '';
+
+      module.source = source;
+
+      // 4. 解析源码，收集依赖
+      const parseResult = await this.parser.parse(source, resolved);
+      module.dependencies = parseResult.dependencies;
+
+      // 5. 递归构建依赖模块
+      for (const dep of parseResult.dependencies) {
+        await this.buildModule(dep.request, module);
+      }
+
+      module.built = true;
+      console.log(`✅ 模块构建完成: ${resolved}`)
+      return module;
+
+    } catch (error) {
+      console.error(`模块构建失败: ${request}`, error)
+      throw error
+    }
+  }
+
+  async buildModule(request: string, issuer?: Module): Promise<Module> {
+    try {
+      // 1. 解析模块路径
+      const resolved = await this.resolver.resolve(request, issuer?.resource);
+
+      // 检查模块是否已经构建
+      if (this.modules.has(resolved)) {
+        return this.modules.get(resolved)!;
+      }
+
+      // 2. 创建模块对象
+      const module: Module = {
+        id: resolved,
+        request: resolved,
+        userRequest: request,
+        rawRequest: request,
+        resource: resolved,
+        dependencies: [],
+        source: '',
+        built: false,
+        error: undefined,
+        warnings: [],
+      };
+
+      this.modules.set(resolved, module);
+
+      // 3. 运行 Loader 处理文件
+      const result = await this.loaderRunner.run(resolved);
+      module.source = result.source!;
+
+      // 4. 解析 AST 并收集依赖
+      const parseResult = await this.parser.parse(result.source!, resolved);
+      module.ast = parseResult.ast;
+      module.dependencies = parseResult.dependencies;
+
+      // 5. 递归构建依赖模块
+      for (const dep of module.dependencies) {
+        try {
+          const depModule = await this.buildModule(dep.request, module);
+          dep.module = depModule;
+        } catch (error: any) {
+          this.errors.push(new Error(`Failed to resolve dependency ${dep.request}: ${error.message}`));
+        }
+      }
+
+      module.built = true;
+      return module;
+
+    } catch (error: any) {
+      this.errors.push(error);
+      throw error;
+    }
+  }
+
+  async seal(): Promise<void> {
+    console.log('🔒 开始封装阶段...')
+
+    // 1. 收集所有已构建的入口模块
+    const entries = this.getEntries()
+    console.log(`📥 处理 ${entries.length} 个入口`)
+
+    const entryModules: Module[] = []
+    for (const entry of entries) {
+      const module = this.modules.get(entry)
+      if (module) {
+        entryModules.push(module)
+      } else {
+        const error = new Error(`入口模块未找到: ${entry}`)
+        this.errors.push(error)
+      }
+    }
+
+    if (entryModules.length === 0) {
+      throw new Error('没有找到有效的入口模块')
+    }
+
+    // 2. 生成chunk图
+    console.log('🎯 生成chunk图...')
+    this.chunks = this.chunkGraph.createChunks(entryModules)
+    console.log(`📦 生成了 ${this.chunks.length} 个chunk`)
+
+    // 3. 为每个chunk生成代码
+    console.log('🔧 生成chunk代码...')
+    for (const chunk of this.chunks) {
+      try {
+        const code = this.codeGenerator.generate(chunk)
+        const filename = this.getChunkFilename(chunk)
+        this.assets.set(filename, code)
+        console.log(`✅ 生成asset: ${filename} (${(code.length / 1024).toFixed(2)} KB)`)
+      } catch (error) {
+        console.error(`❌ 生成chunk失败: ${chunk.name}`, error)
+        this.errors.push(error as Error)
+      }
+    }
+
+    console.log(`🎉 封装完成! 生成了 ${this.assets.size} 个文件`)
+  }
+
+  async emit(): Promise<void> {
+    console.log('📄 开始输出文件...')
+
+    const outputPath = this.compiler.config.output.path
+    console.log(`📁 输出目录: ${outputPath}`)
+
+    // 确保输出目录存在
+    try {
+      const { mkdir } = await import('fs/promises')
+      await mkdir(outputPath, { recursive: true })
+    } catch (error: any) {
+      if (error.code !== 'EEXIST') {
+        console.error('❌ 创建输出目录失败:', error)
+        this.errors.push(error)
+        return
+      }
+    }
+
+    // 写入所有asset文件
+    const writePromises = []
+    for (const [filename, content] of this.assets) {
+      const fullPath = join(outputPath, filename)
+      console.log(`💾 写入文件: ${filename}`)
+
+      writePromises.push(
+        writeFile(fullPath, content).catch(error => {
+          console.error(`❌ 写入文件失败: ${filename}`, error)
+          this.errors.push(error)
+        })
+      )
+    }
+
+    // 等待所有文件写入完成
+    await Promise.all(writePromises)
+
+    if (this.errors.length === 0) {
+      console.log(`✅ 文件输出完成! 共 ${this.assets.size} 个文件`)
+    } else {
+      console.error(`⚠️ 输出完成，但有 ${this.errors.length} 个错误`)
+    }
+  }
+
+  private getEntries(): string[] {
+    const { entry } = this.compiler.config;
+
+    if (typeof entry === 'string') {
+      return [entry];
+    } else if (Array.isArray(entry)) {
+      return entry;
+    } else {
+      return Object.values(entry);
+    }
+  }
+
+  private getChunkFilename(chunk: Chunk): string {
+    const { filename } = this.compiler.config.output;
+    return filename.replace('[name]', chunk.name).replace('[hash]', chunk.hash);
+  }
+}
