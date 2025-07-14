@@ -1,59 +1,65 @@
 import type { Dependency } from "../types/module.js"
 
 export class DependencyCollector {
-    collect(ast: any): Dependency[] {
+    collect(ast: any, source?: string): Dependency[] {
         const dependencies: Dependency[] = []
 
-        if (!ast) return dependencies
-
-        try {
-            import('acorn-walk').then(({ simple }) => {
-                simple(ast, {
-                    CallExpression: (node: any) => {
-                        // require()
-                        if (node.callee.name === 'require' && node.arguments.length === 1) {
-                            const arg = node.arguments[0]
-                            if (arg.type === 'Literal' && typeof arg.value === 'string') {
-                                dependencies.push({
-                                    type: 'require',
-                                    request: arg.value,
-                                    loc: node.loc
-                                })
-                            }
-                        }
-
-                        // import
-                        if (node.callee.name === 'Import' && node.arguments.length === 1) {
-                            const arg = node.arguments[0]
-                            if (arg.type === 'Literal' && typeof arg.value === 'string') {
-                                dependencies.push({
-                                    type: 'dynamic-import',
-                                    request: arg.value,
-                                    loc: node.loc
-                                })
-                            }
-                        }
-                    },
-                    ImportDeclaration: (node: any) => {
-                        // import 声明
-                        if (node.source && node.source.type === 'Literal') {
-                            dependencies.push({
-                                type: 'import',
-                                request: node.source.value,
-                                loc: node.loc
-                            })
-                        }
-                    }
-                })
-            }).catch(() => {
-                // 如果没有 acorn-walk，使用简化版本
-                console.warn('DependencyCollector: acorn-walk not found');
-            })
-        } catch (error) {
-            // 如果没有 acorn-walk，使用简化版本
-            console.warn('DependencyCollector: acorn-walk not found');
+        // 如果有源码，使用正则表达式解析（更可靠）
+        if (source) {
+            return this.collectDependenciesFromSource(source);
         }
 
+        // TODO: 如果需要更精确的AST解析，可以在这里实现
+        console.warn('DependencyCollector: 缺少源码，跳过依赖收集');
         return dependencies
+    }
+
+    private collectDependenciesFromSource(source: string): Dependency[] {
+        const dependencies: Dependency[] = [];
+
+        console.log(`🔍 开始收集依赖，源码长度: ${source.length}`);
+        console.log(`📝 源码内容:\n${source}`);
+
+        // ES6 import 语句的各种形式
+        // import xxx from 'module'
+        // import { xxx } from 'module' 
+        // import * as xxx from 'module'
+        // import 'module'
+        const importRegex = /import\s+(?:[^'"]*\s+from\s+)?['"]([^'"]+)['"]/g;
+        let match;
+
+        while ((match = importRegex.exec(source)) !== null) {
+            const request = match[1];
+            console.log(`📦 找到 import 依赖: ${request}`);
+            dependencies.push({
+                type: 'import',
+                request: request,
+            });
+        }
+
+        // CommonJS require: require('module')
+        const requireRegex = /require\(['"]([^'"]+)['"]\)/g;
+        while ((match = requireRegex.exec(source)) !== null) {
+            const request = match[1];
+            console.log(`📦 找到 require 依赖: ${request}`);
+            dependencies.push({
+                type: 'require',
+                request: request,
+            });
+        }
+
+        // 动态 import: import('module')
+        const dynamicImportRegex = /import\(['"]([^'"]+)['"]\)/g;
+        while ((match = dynamicImportRegex.exec(source)) !== null) {
+            const request = match[1];
+            console.log(`📦 找到动态 import 依赖: ${request}`);
+            dependencies.push({
+                type: 'dynamic-import',
+                request: request,
+            });
+        }
+
+        console.log(`✅ 依赖收集完成，共找到 ${dependencies.length} 个依赖`);
+        return dependencies;
     }
 }

@@ -16,6 +16,8 @@ export class Parser {
 
   async parse(source: string, resourcePath: string): Promise<ParseResult> {
     try {
+      console.log(`🔍 解析文件: ${resourcePath}`);
+
       // 动态导入
       const acorn = await import('acorn')
 
@@ -25,7 +27,10 @@ export class Parser {
         locations: true
       })
 
-      const dependencies = this.dependencyCollector.collect(ast)
+      // 传递源码给依赖收集器
+      const dependencies = this.dependencyCollector.collect(ast, source)
+
+      console.log(`✅ 解析完成: ${resourcePath}, 依赖数量: ${dependencies.length}`);
 
       return {
         ast,
@@ -38,6 +43,7 @@ export class Parser {
         const dependencies = this.collectDependenciesSimple(source);
         return { ast: null, dependencies };
       }
+      console.error(`解析失败 ${resourcePath}:`, error.message);
       throw new Error(`Failed to parse ${resourcePath}: ${error.message}`);
     }
   }
