@@ -13,6 +13,9 @@ export interface RuntimeModule {
  * 生成webpack风格的bundle包装器
  */
 export function generateBundleTemplate(modules: Record<string, string>, entryModuleId: string): string {
+  // 规范化入口模块ID，确保使用正斜杠
+  const normalizedEntryId = entryModuleId.replace(/\\/g, '/')
+
   return `
 (function(modules) {
   // 模块缓存
@@ -72,7 +75,7 @@ export function generateBundleTemplate(modules: Record<string, string>, entryMod
   __webpack_require__.p = "";
 
   // 加载入口模块并返回导出
-  return __webpack_require__("${entryModuleId}");
+  return __webpack_require__("${normalizedEntryId}");
 })({
 ${Object.entries(modules).map(([moduleId, source]) =>
     `"${moduleId}": function(module, exports, __webpack_require__) {\n${source}\n}`
@@ -84,31 +87,35 @@ ${Object.entries(modules).map(([moduleId, source]) =>
  * 将ES6模块转换为CommonJS格式
  */
 export function transformESModuleToCommonJS(source: string): string {
-  // 简单的ES6 import/export转换
   let transformed = source
 
-  // 转换 export default
+  // 标记为ES模块
+  transformed = '__webpack_require__.r(exports);\n' + transformed
+
+  // 1. 转换 export function
+  transformed = transformed.replace(
+    /export\s+function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\([^)]*\)\s*{[^}]*}/g,
+    (match, functionName) => {
+      const functionDeclaration = match.replace(/^export\s+/, '')
+      return `${functionDeclaration}\n__webpack_require__.d(exports, "${functionName}", function() { return ${functionName}; });`
+    }
+  )
+
+  // 2. 转换 export const/let/var
+  transformed = transformed.replace(
+    /export\s+(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=([^;]+);/g,
+    (match, type, varName, value) => {
+      return `${type} ${varName} =${value};\n__webpack_require__.d(exports, "${varName}", function() { return ${varName}; });`
+    }
+  )
+
+  // 3. 转换 export default
   transformed = transformed.replace(
     /export\s+default\s+(.+)/g,
     'module.exports.default = $1;\nmodule.exports = module.exports.default;'
   )
 
-  // 转换 export function/const/let/var
-  transformed = transformed.replace(
-    /export\s+(function|const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/g,
-    '$1 $2'
-  )
-
-  // 在函数/变量声明后添加导出
-  transformed = transformed.replace(
-    /((?:function|const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)[^;]*(?:;|$))/g,
-    (match, declaration, name) => {
-      if (match.includes('export')) return match
-      return `${declaration}\n__webpack_require__.d(exports, "${name}", function() { return ${name}; });`
-    }
-  )
-
-  // 转换 export { name }
+  // 4. 转换 export { name }
   transformed = transformed.replace(
     /export\s*{\s*([^}]+)\s*}/g,
     (match, exports) => {
@@ -119,25 +126,22 @@ export function transformESModuleToCommonJS(source: string): string {
     }
   )
 
-  // 转换 import
+  // 5. 转换 import { name } from 'module'
   transformed = transformed.replace(
     /import\s+{\s*([^}]+)\s*}\s+from\s+['"]([^'"]+)['"]/g,
     (match, imports, modulePath) => {
       const names = imports.split(',').map((name: string) => name.trim())
       const varName = `__module_${Math.random().toString(36).substr(2, 9)}`
       return `var ${varName} = __webpack_require__("${modulePath}");\n` +
-        names.map((name: string) => `var ${name} = ${varName}.${name};`).join('\n')
+        names.map((name: string) => `var ${name} = ${varName}.${name};`).join('\n') + ';'
     }
   )
 
-  // 转换 import default
+  // 6. 转换 import default
   transformed = transformed.replace(
     /import\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s+from\s+['"]([^'"]+)['"]/g,
     'var $1 = __webpack_require__("$2").default || __webpack_require__("$2");'
   )
-
-  // 标记为ES模块
-  transformed = '__webpack_require__.r(exports);\n' + transformed
 
   return transformed
 }
