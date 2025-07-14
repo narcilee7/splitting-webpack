@@ -48,6 +48,9 @@ export class ChunkGraph {
             return
         }
 
+        // 标记当前模块为已访问
+        visited.add(module)
+
         // 只收集静态依赖
         for (const dep of module.dependencies) {
             if (dep.type === 'dynamic-import') {
