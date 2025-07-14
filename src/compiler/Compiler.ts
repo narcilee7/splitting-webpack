@@ -21,13 +21,11 @@ export class Compiler {
             emit: new AsyncSeriesHook(),
             afterEmit: new AsyncSeriesHook()
         }
-
-        this.initialPlugins()
     }
 
-    private initialPlugins(): void {
+    private async initialPlugins(): Promise<void> {
         // 应用内置插件
-        this.applyBuiltinPlugins()
+        await this.applyBuiltinPlugins()
 
         // 应用用户插件
         if (this.config.plugins) {
@@ -38,13 +36,13 @@ export class Compiler {
         }
     }
 
-    private applyBuiltinPlugins(): void {
+    private async applyBuiltinPlugins(): Promise<void> {
         const { mode, devtool } = this.config
 
         // 根据mode自动应用相关插件
         if (mode === 'development') {
             // 开发模式自动应用进度插件
-            const { ProgressPlugin } = require('../plugins/index.js')
+            const { ProgressPlugin } = await import('../plugins/index.js')
             new ProgressPlugin({
                 profile: true,
                 showModules: true
@@ -53,7 +51,7 @@ export class Compiler {
 
         // 自动应用DefinePlugin设置环境变量
         if (mode) {
-            const { DefinePlugin } = require('../plugins/index.js')
+            const { DefinePlugin } = await import('../plugins/index.js')
             new DefinePlugin({
                 'process.env.NODE_ENV': JSON.stringify(mode),
                 'process.env.WEBPACK_MODE': JSON.stringify(mode)
@@ -62,7 +60,7 @@ export class Compiler {
 
         // 如果开启了clean选项，自动应用清理插件
         if (this.config.output.clean) {
-            const { CleanWebpackPlugin } = require('../plugins/index.js')
+            const { CleanWebpackPlugin } = await import('../plugins/index.js')
             new CleanWebpackPlugin({
                 verbose: mode === 'development'
             }).apply(this)
@@ -74,6 +72,9 @@ export class Compiler {
     async run(): Promise<Stats> {
         try {
             console.log('🚀 开始构建...')
+
+            // 0. 初始化插件
+            await this.initialPlugins()
 
             // 1. 环境准备阶段
             this.hooks.environment.call()

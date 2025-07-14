@@ -12,10 +12,9 @@ export default async function babelLoader(
         const options = {
             filename: context.resourcePath,
             presets: [
-                ['@babel/preset-env', { modules: false }],
-                '@babel/preset-typescript'
+                ['@babel/preset-env', { modules: false }]
             ],
-            plugin: [],
+            plugins: [],
             sourceMap: true,
             ...JSON.parse(context.query || '{}')
         }
