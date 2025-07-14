@@ -44,23 +44,39 @@ export class ChunkGraph {
     }
 
     private collectModulesForChunk(module: Module, chunk: Chunk, visited: Set<Module>): void {
+        console.log(`🔍 收集模块到chunk: ${module.resource} -> ${chunk.name}`)
+
         if (visited.has(module)) {
+            console.log(`⏭️  模块已访问，跳过: ${module.resource}`)
             return
         }
 
         // 标记当前模块为已访问
         visited.add(module)
+        console.log(`✅ 标记模块为已访问: ${module.resource}`)
 
         // 只收集静态依赖
+        console.log(`📦 检查模块依赖 (${module.dependencies.length}个): ${module.resource}`)
         for (const dep of module.dependencies) {
+            console.log(`🔗 处理依赖: ${dep.request} (type: ${dep.type})`)
+
             if (dep.type === 'dynamic-import') {
                 // 动态导入通过handlerDynamicImports创建新的chunk，这里不处理
+                console.log(`⏭️  跳过动态导入: ${dep.request}`)
                 continue
             }
 
-            if (dep.module && !this.moduleToChunk.has(dep.module)) {
-                this.addModuleToChunk(dep.module, chunk)
-                this.collectModulesForChunk(dep.module, chunk, visited)
+            if (dep.module) {
+                console.log(`✅ 依赖模块存在: ${dep.module.resource}`)
+                if (!this.moduleToChunk.has(dep.module)) {
+                    console.log(`📥 添加依赖模块到chunk: ${dep.module.resource}`)
+                    this.addModuleToChunk(dep.module, chunk)
+                    this.collectModulesForChunk(dep.module, chunk, visited)
+                } else {
+                    console.log(`⏭️  依赖模块已在其他chunk中: ${dep.module.resource}`)
+                }
+            } else {
+                console.log(`❌ 依赖模块不存在: ${dep.request}`)
             }
         }
     }

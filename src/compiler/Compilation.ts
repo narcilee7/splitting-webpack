@@ -92,7 +92,9 @@ export class Compilation {
 
       // 5. 递归构建依赖模块
       for (const dep of parseResult.dependencies) {
-        await this.buildModule(dep.request, module);
+        const depModule = await this.buildModule(dep.request, module);
+        // 将构建完成的模块对象回填到依赖中
+        dep.module = depModule;
       }
 
       module.built = true;
