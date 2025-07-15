@@ -60,11 +60,12 @@ export class Resolver {
      */
     private resolveAlias(request: string): string {
         for (const [alias, target] of Object.entries(this.config?.alias || {})) {
-            // prefix级别，没有边界判断
-            // if (request.startsWith(alias)) {
-            //     return request.replace(alias, target)
-            // }
-            if (request === alias || request.startsWith(alias + '/')) {
+            // 完全别名
+            if (request === alias) {
+                return target
+            }
+            // 别名+路径
+            if (request.startsWith(alias + '/')) {
                 return target + request.slice(alias.length)
             }
         }
@@ -98,7 +99,7 @@ export class Resolver {
                 return withExt
             }
         }
-    
+
         throw new Error(`File not found: ${path}`)
     }
 
