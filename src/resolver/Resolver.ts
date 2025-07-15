@@ -1,7 +1,12 @@
 import { resolve, dirname, extname, join, isAbsolute } from 'path'
-import { readFile, exists } from '../utils/fs.js'
+import { readFile, exists, isDirectory } from '../utils/fs.js'
 import { Configuration } from '../types/config.js'
 
+/**
+ * 模块解析器
+ * 
+ * 支持: "相对路径、绝对路径、扩展名推断"
+ */
 export class Resolver {
     private config: Configuration['resolve']
 
@@ -48,27 +53,44 @@ export class Resolver {
             throw new Error(`Cannot resolve module ${request}: ${error.message}`)
         }
     }
-
+    /**
+     * 处理别名
+     * @param request 
+     * @returns 
+     */
     private resolveAlias(request: string): string {
         for (const [alias, target] of Object.entries(this.config?.alias || {})) {
-            if (request.startsWith(alias)) {
-                return request.replace(alias, target)
+            // prefix级别，没有边界判断
+            // if (request.startsWith(alias)) {
+            //     return request.replace(alias, target)
+            // }
+            if (request === alias || request.startsWith(alias + '/')) {
+                return target + request.slice(alias.length)
             }
         }
         return request
     }
 
     private async resolveFile(path: string): Promise<string> {
+        /**
+         * 1. 如果是已存在的文件，直接返回
+         * 2. 如果是已存在的目录，尝试当作package
+         * 3. 如果是没有扩展名的路径，才走拼接扩展名
+         */
         console.log(`🔎 检查文件: ${path}`)
 
         // 如果文件已经存在
         if (await exists(path)) {
+            if (await isDirectory(path)) {
+                console.log(`目录路径，尝试作为包解析: ${path}`)
+                return await this.resolvePackage(path)
+            }
             console.log(`✅ 文件存在: ${path}`)
             return path
         }
 
-        // 尝试添加扩展名
         for (const ext of this.config?.extensions || []) {
+            // 如果是不存在的路径 -> 只可能是缺少扩展名
             const withExt = path + ext
             console.log(`🔎 尝试扩展名: ${withExt}`)
             if (await exists(withExt)) {
@@ -76,17 +98,7 @@ export class Resolver {
                 return withExt
             }
         }
-
-        // 如果没有扩展名，可能是目录，尝试解析为包
-        if (!extname(path)) {
-            console.log(`📁 尝试作为目录解析: ${path}`)
-            try {
-                return await this.resolvePackage(path)
-            } catch (error) {
-                // 忽略包解析错误，继续抛出文件不存在错误
-            }
-        }
-
+    
         throw new Error(`File not found: ${path}`)
     }
 

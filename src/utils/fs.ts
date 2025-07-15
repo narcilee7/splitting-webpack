@@ -1,5 +1,6 @@
 import { promises as fs } from "fs"
 import { dirname } from "path"
+import { stat } from "fs/promises"
 
 const ensureDire = async (path: string): Promise<void> => {
     try {
@@ -29,9 +30,20 @@ const exists = async (path: string): Promise<boolean> => {
     }
 }
 
+const isDirectory = async (path: string): Promise<boolean> => {
+    try {
+        const s = await stat(path)
+        return s.isDirectory()
+    } catch (error) {
+        return false
+    }
+}
+
+
 export {
     ensureDire,
     readFile,
     writeFile,
-    exists
+    exists,
+    isDirectory
 }

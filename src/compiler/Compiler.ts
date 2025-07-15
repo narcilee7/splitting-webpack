@@ -4,13 +4,19 @@ import type { CompilerHooks, Stats } from '../types/compiler.js'
 import { Compilation } from "./Compilation.js"
 import { StatsImpl } from "./Stats.js"
 
+/**
+ * 主编译器
+ */
 export class Compiler {
+    // 编译Hooks
     public hooks: CompilerHooks
+    // 主编译器配置
     public config: Configuration
     public compilation?: Compilation
 
     constructor(config: Configuration) {
         this.config = config
+        // 初始化所有的Hooks
         this.hooks = {
             environment: new SyncHook(),
             afterEnvironment: new SyncHook(),

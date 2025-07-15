@@ -38,6 +38,7 @@ export class DefinePlugin {
 
             // 创建正则表达式来匹配全局变量
             // 注意：这是一个简化的实现，真实的webpack使用AST替换
+            // TODO 替换实现
             const regex = new RegExp(`\\b${this.escapeRegExp(key)}\\b`, 'g')
 
             const originalLength = result.length

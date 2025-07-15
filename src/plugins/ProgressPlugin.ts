@@ -3,11 +3,11 @@ import type { Compilation } from "../compiler/Compilation.js"
 import chalk from "chalk"
 
 export interface ProgressPluginOptions {
-    profile?: boolean
-    modulesCount?: number
-    showEntries?: boolean
-    showModules?: boolean
-    showActiveModules?: boolean
+    profile?: boolean // 是否展示概况
+    modulesCount?: number // 依赖数量
+    showEntries?: boolean // 是否展示入口
+    showModules?: boolean // 是否展示依赖
+    showActiveModules?: boolean // 是否展示动态依赖
 }
 
 export class ProgressPlugin {

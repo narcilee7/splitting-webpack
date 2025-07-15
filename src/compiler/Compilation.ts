@@ -7,21 +7,22 @@ import { CodeGenerator } from "../chunk/CodeGenerator.js";
 import { ChunkGraph } from "../chunk/ChunkGraph.js";
 import { Parser } from "../parser/Parser.js";
 import { join } from "path";
+import { promises } from 'fs'
 import { writeFile } from "../utils/fs.js";
 
 export class Compilation {
-  public compiler: Compiler;
-  public modules: Map<string, Module> = new Map();
-  public chunks: Chunk[] = [];
-  public errors: Error[] = [];
-  public warnings: string[] = [];
-  public assets: Map<string, string> = new Map();
+  public compiler: Compiler; // 主编译器
+  public modules: Map<string, Module> = new Map(); // 模块
+  public chunks: Chunk[] = []; // chunks
+  public errors: Error[] = []; // 错误
+  public warnings: string[] = []; // 警告
+  public assets: Map<string, string> = new Map(); // 依赖
 
-  private resolver: Resolver;
-  private loaderRunner: LoaderRunner;
-  private parser: Parser;
-  private chunkGraph: ChunkGraph;
-  private codeGenerator: CodeGenerator;
+  private resolver: Resolver; // 解析器
+  private loaderRunner: LoaderRunner; // 
+  private parser: Parser; // 解析器
+  private chunkGraph: ChunkGraph; // chunk图
+  private codeGenerator: CodeGenerator; // 代码生成器
 
   constructor(compiler: Compiler) {
     this.compiler = compiler;
@@ -226,8 +227,7 @@ export class Compilation {
 
     // 确保输出目录存在
     try {
-      const { mkdir } = await import('fs/promises')
-      await mkdir(outputPath, { recursive: true })
+      await promises.mkdir(outputPath, { recursive: true })
     } catch (error: any) {
       if (error.code !== 'EEXIST') {
         console.error('❌ 创建输出目录失败:', error)
@@ -261,6 +261,7 @@ export class Compilation {
   }
 
   private getEntries(): string[] {
+    // 从配置中获取入口 以数组形式输出
     const { entry } = this.compiler.config;
 
     if (typeof entry === 'string') {
