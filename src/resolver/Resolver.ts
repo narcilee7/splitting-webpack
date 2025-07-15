@@ -10,6 +10,8 @@ import { Configuration } from '../types/config.js'
 export class Resolver {
     private config: Configuration['resolve']
 
+    private triedPaths: string[] = []
+
     constructor(config: Configuration['resolve'] = {}) {
         this.config = {
             extensions: ['.js', '.ts', '.json'],
@@ -22,6 +24,8 @@ export class Resolver {
     }
 
     async resolve(request: string, issuer?: string): Promise<string> {
+        // 先清空调用paths
+        this.triedPaths = []
         try {
             console.log(`🔍 解析模块: ${request}, issuer: ${issuer || '无'}`)
 
@@ -37,8 +41,11 @@ export class Resolver {
             // 处理相对路径
             if (aliasedRequest.startsWith('./') || aliasedRequest.startsWith('../')) {
                 if (!issuer) {
-                    throw new Error(`Cannot resolve relative path ${request} without issuer`)
-                }
+                    const errMsg = `Cannot resolve relative path ${request} without issuer\n`
+                    + `Tried paths:\n`
+                    + this.triedPaths.map(p => `  - ${p}`).join('\n')
+                    throw new Error(errMsg)
+                 }
                 const basedir = dirname(issuer)
                 const resolved = resolve(basedir, aliasedRequest)
                 console.log(`📂 相对路径解析: ${aliasedRequest} -> ${resolved}`)
@@ -81,6 +88,7 @@ export class Resolver {
         console.log(`🔎 检查文件: ${path}`)
 
         // 如果文件已经存在
+        this.triedPaths.push(path)
         if (await exists(path)) {
             if (await isDirectory(path)) {
                 console.log(`目录路径，尝试作为包解析: ${path}`)
@@ -94,6 +102,7 @@ export class Resolver {
             // 如果是不存在的路径 -> 只可能是缺少扩展名
             const withExt = path + ext
             console.log(`🔎 尝试扩展名: ${withExt}`)
+            this.triedPaths.push(withExt)
             if (await exists(withExt)) {
                 console.log(`✅ 文件存在 (带扩展名): ${withExt}`)
                 return withExt
@@ -108,6 +117,7 @@ export class Resolver {
 
         // 查找package.json
         const packagePath = join(dir, 'package.json')
+        this.triedPaths.push(packagePath)
         if (await exists(packagePath)) {
             console.log(`📄 找到 package.json: ${packagePath}`)
             const packageJson = JSON.parse(await readFile(packagePath))
@@ -117,6 +127,7 @@ export class Resolver {
                 if (packageJson[field]) {
                     const mainFile = resolve(dir, packageJson[field])
                     console.log(`🔎 尝试主字段 ${field}: ${mainFile}`)
+                    this.triedPaths.push(mainFile)
                     if (await exists(mainFile)) {
                         console.log(`✅ 找到主文件: ${mainFile}`)
                         return mainFile
@@ -130,6 +141,7 @@ export class Resolver {
             for (const ext of this.config?.extensions || []) {
                 const filePath = join(dir, mainFile + ext)
                 console.log(`🔎 尝试主文件: ${filePath}`)
+                this.triedPaths.push(filePath)
                 if (await exists(filePath)) {
                     console.log(`✅ 找到主文件: ${filePath}`)
                     return filePath
