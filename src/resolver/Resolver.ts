@@ -5,7 +5,7 @@ import { Configuration } from '../types/config.js'
 /**
  * 模块解析器
  * 
- * 支持: "相对路径、绝对路径、扩展名推断"
+ * 支持: "相对路径、绝对路径、扩展名、别名、node_modules、package.json、mainFiles"
  */
 export class Resolver {
     private config: Configuration['resolve']
@@ -109,6 +109,15 @@ export class Resolver {
             }
         }
 
+        // 目录 => 包
+        if (!extname(path)) {
+            try {
+                return await this.resolvePackage(path)
+            } catch (error) {
+                console.warn(`目录解析失败: ${path}`)
+            }
+        }
+
         throw new Error(`File not found: ${path}`)
     }
 
@@ -187,17 +196,38 @@ export class Resolver {
         if (issuer) {
             // 从issuer所在的目录开始向上查找node_modules
             let currentDir = dirname(issuer)
-            while (currentDir !== dirname(currentDir)) {
+            const root = dirname(currentDir)
+            while (currentDir && currentDir !== root) {
                 dirs.push(join(currentDir, 'node_modules'))
                 currentDir = dirname(currentDir)
             }
         }
 
-        // 添加全局模块目录
-        for (const moduleDir of this.config?.modules || []) {
-            dirs.push(resolve(moduleDir))
+        for (const custom of this.config?.modules || []) {
+            if (isAbsolute(custom)) {
+                dirs.push(custom)
+            } else {
+                dirs.push(resolve(custom))
+            }
+        }
+        return dirs
+    }
+    
+    private async resolveNodeModule(request: string, issuer?: string): Promise<string> {
+        const searchDirs = this.getModuleDirs(issuer)
+
+        console.log(`📦 node_modules 搜索路径:`, searchDirs)
+
+        for (const moduleDir of searchDirs) {
+            const candidate = join(moduleDir, request)
+
+            try {
+                return await this.resolveFile(candidate)
+            } catch (error) {
+                console.warn(`忽略路径: ${candidate}`)
+            }
         }
 
-        return dirs
+        throw new Error(`Cannot resolve module ${request}`)
     }
 }
