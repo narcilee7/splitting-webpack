@@ -145,13 +145,23 @@ export class Resolver {
         console.log(`📦 解析模块 ${request}, 搜索目录:`, moduleDirs)
 
         for (const moduleDir of moduleDirs) {
-            const packageDir = join(moduleDir, request)
-            console.log(`🔎 尝试模块目录: ${packageDir}`)
+            const [packageName, ...subPathParts] = request.split('/')
+            const subPath = subPathParts.join('/')
+
+            const packageDir = join(moduleDir, packageName)
+            console.log(`尝试模块包目录，${packageDir}`)
 
             try {
-                return await this.resolvePackage(packageDir)
+                let entryFile = await this.resolvePackage(packageDir)
+
+                if (subPath) {
+                    // 拼接子路径
+                    const fullSubPath = resolve(dirname(entryFile), subPath)
+                    return await this.resolveFile(fullSubPath)
+                }
+
+                return entryFile
             } catch (error) {
-                // 尝试下一个
                 continue
             }
         }
