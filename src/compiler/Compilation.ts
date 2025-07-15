@@ -13,6 +13,7 @@ import { writeFile } from "../utils/fs.js";
 export class Compilation {
   public compiler: Compiler; // 主编译器
   public modules: Map<string, Module> = new Map(); // 模块
+  public moduleBuildPromises = new Map<string, Promise<Module>>() // 并发构建Promises
   public chunks: Chunk[] = []; // chunks
   public errors: Error[] = []; // 错误
   public warnings: string[] = []; // 警告
@@ -26,11 +27,16 @@ export class Compilation {
 
   constructor(compiler: Compiler) {
     this.compiler = compiler;
-    this.resolver = new Resolver(compiler.config.resolve);
+    // TODO 支持从Compiler注入 单例
+    this.resolver =   new Resolver(compiler.config.resolve);
     this.loaderRunner = new LoaderRunner(compiler.config.module?.rules || []);
     this.parser = new Parser();
     this.chunkGraph = new ChunkGraph();
     this.codeGenerator = new CodeGenerator();
+  }
+
+  private log(message: string, ...args: any[]) {
+    // if (!this.compiler.config.sl)
   }
 
   async build(): Promise<void> {
@@ -39,12 +45,25 @@ export class Compilation {
     try {
       const entries = this.getEntries()
 
+      if (entries.length === 0) {
+        throw new Error('❌ 没有配置有效的入口')
+      }
+
       // 构建所有入口模块
       for (const entry of entries) {
         console.log(`📥 构建入口: ${entry}`)
         // 为入口文件提供基准目录 - 使用配置文件所在目录或当前工作目录
         const entryContext = this.compiler.config.context || process.cwd()
-        await this.buildModuleWithContext(entry, entryContext)
+        try {
+          await this.buildModuleWithContext(entry, entryContext)
+        } catch (error: any) {
+          console.log(`❌ 【Error】构建入口失败：${entry}`, error)
+          this.errors.push(new Error(`构建入口失败: ${entry} - ${error.message}`));
+        }
+      }
+
+      if (this.errors.length > 0) {
+        throw new Error(`构建阶段出错，共 ${this.errors.length} 个错误`);
       }
 
       console.log(`📊 构建完成! 共 ${this.modules.size} 个模块`)
@@ -110,9 +129,14 @@ export class Compilation {
 
   async buildModule(request: string, issuer?: Module): Promise<Module> {
     try {
+      const context = issuer?.resource
       // 1. 解析模块路径
-      const resolved = await this.resolver.resolve(request, issuer?.resource);
+      const resolved = await this.resolver.resolve(request, context);
 
+      // 并发安全：Promise缓存
+      if (this.moduleBuildPromises.has(resolved)) {
+        return this.moduleBuildPromises.get(resolved)
+      }
       // 检查模块是否已经构建
       if (this.modules.has(resolved)) {
         return this.modules.get(resolved)!;
